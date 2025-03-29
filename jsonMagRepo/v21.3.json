@@ -1,0 +1,19 @@
+{
+  "app": {
+    "version": "8.0.6",
+    "versionCode": "4826",
+    "link": "https://github.com/Dark-ST-Phantom/File-O-Trash/raw/main/MagiskBkp/21.3/MagiskManager-v8.0.6.apk"
+  },
+  "stub": {
+    "link": "https://github.com/Dark-ST-Phantom/File-O-Trash/raw/main/MagiskBkp/21.3/stub-release.apk"
+  },
+  "uninstaller": {
+    "link": "https://github.com/Dark-ST-Phantom/File-O-Trash/raw/main/MagiskBkp/21.3/Magisk-uninstaller-20210116.zip"
+  },
+  "magisk": {
+    "version": "21.3",
+    "versionCode": "21300",
+    "link": "https://github.com/Dark-ST-Phantom/File-O-Trash/raw/main/MagiskBkp/21.3/Magisk-v21.3.zip",
+    "md5": "796981015E4EB7278703AAD77B4476FE"
+  }
+}

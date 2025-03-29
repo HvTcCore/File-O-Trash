@@ -1,0 +1,2 @@
+This folder contains the latest versions of Zenmap downloaded from the official website, converted to deb format with a fixed startup script "as root" and dependencies for installation using apt.
+zenmap_7.92-3_all.deb. Requires the installation of [python-gtk2] to work (the file is located in the directory, if required).
