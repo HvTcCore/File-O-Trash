@@ -1,0 +1,41 @@
+#!/bin/sh
+
+echo
+echo Запущен скрипт оптимальной настройки ZRAM
+sleep 3
+
+echo
+echo Настройка ZRAM, ожидайте
+echo [Параметры: DISKSIZE=2G, SWAPPINESS=98]
+sleep 2
+
+echo
+echo Остановка процесса ZRAM, если уже запущен...
+echo [Может занять некоторое время]
+swapoff \/dev\/block\/zram* > \/dev\/null 2>&1
+echo '1' > \/sys\/block\/zram*\/reset
+echo '0' > \/sys\/block\/zram*\/disksize
+sleep 2
+
+echo
+echo Настройка нового процесса ZRAM...
+echo '4' > \/sys\/block\/zram*\/max_comp_streams
+echo 2G > \/sys\/block\/zram*\/disksize
+echo 98 > \/proc\/sys\/vm\/swappiness
+sleep 2
+
+echo
+echo Запуск процесса ZRAM...
+mkswap \/dev\/block\/zram* > \/dev\/null 2>&1
+swapon \/dev\/block\/zram* > \/dev\/null 2>&1
+sleep 2
+
+echo
+echo Выполнение завершено. Отображение вывода памяти "(строка Swap)"
+echo
+free
+
+echo
+echo Команда для остановки ZRAM [zramstop]
+echo Команда для настройки ZRAM [zramconf]
+echo

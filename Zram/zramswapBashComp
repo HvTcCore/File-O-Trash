@@ -1,0 +1,27 @@
+_zramswapBash()
+{
+	local cur prev
+
+	COMPREPLY=()
+	cur="${COMP_WORDS[COMP_CWORD]}"
+	prev="${COMP_WORDS[COMP_CWORD - 1]}"
+	words=""
+	case "${prev}" in
+		zramswap)
+			words="start config stop addev rmdev info help"
+			;;
+		start)
+			words="lite"
+			;;
+		addev)
+			words="max"
+			;;
+		*)
+			;;
+	esac
+
+	COMPREPLY=($(compgen -W "$words" -- $cur))
+	return 0
+}
+
+complete -F _zramswapBash zramswap   

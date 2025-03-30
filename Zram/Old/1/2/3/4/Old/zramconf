@@ -1,0 +1,61 @@
+#!/bin/sh
+echo
+echo Запущен скрипт ручной настройки ZRAM.
+echo [Если скрипт запущен по ошибке, используйте CTRL+C для отмены]
+sleep 4
+
+echo
+echo Требуется ввести некоторые параметры
+sleep 2
+
+#Параметры настройки zram
+echo
+echo Введите значение DISKSIZE "(Рекомендуется не меньше 3G):"
+echo "(Внимание! В случае многопоточной работы zram указывать значение, делённое на количество потоков процессора)"
+echo [Справка: DISKSIZE - Это значение, определяющее количество памяти в ZRAM]
+read MEM
+echo Выбрано значение: $MEM
+sleep 2
+
+echo
+echo Введите значение SWAPPINESS "(Рекомендуется 60-85):"
+echo [Справка: SWAPPINESS - Это процент СВОБОДНОЙ оперативной памяти, при котором система начинает использовать ZRAM]
+read SPNS
+echo Выбрано значение: $SPNS
+sleep 2
+
+# Процесс настройки
+echo
+echo Настройка ZRAM запущена, ожидайте
+sleep 2
+
+echo
+echo Остановка процесса ZRAM, если уже запущен... 
+echo [Процесс может занять некоторое время]
+swapoff \/dev\/zram* > \/dev\/null 2>&1
+echo '1' > \/sys\/block\/zram*\/reset
+echo '0' > \/sys\/block\/zram*\/disksize
+sleep 2
+
+echo
+echo Настройка нового процесса ZRAM...
+echo '4' > \/sys\/block\/zram*\/max_comp_streams
+echo $MEM > \/sys\/block\/zram*\/disksize
+echo $SPNS > \/proc\/sys\/vm\/swappiness
+sleep 2
+
+echo
+echo Запуск процесса ZRAM...
+mkswap \/dev\/zram* > \/dev\/null 2>&1
+swapon \/dev\/zram* > \/dev\/null 2>&1
+sleep 2
+
+echo
+echo Выполнение завершено. Отображение вывода памяти "(строка Swap)"
+echo
+free
+
+echo
+echo Команда для остановки ZRAM [zramstop]
+echo Команда для оптимального запуска ZRAM [zramauto]
+echo

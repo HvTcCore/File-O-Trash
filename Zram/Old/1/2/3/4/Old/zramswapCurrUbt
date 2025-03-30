@@ -1,10 +1,10 @@
 #!/bin/sh 
 
 # Универсальный скрипт ZRAM для андроида и линукса
-## Версия 1.2
+## Версия 1.0
 # МОДИФИЦИРОВАННАЯ ВЕРСИЯ
 # MY TODO:
-#	* Перепроверить функции на корректное фунционирование на разных устройствах и прошивках
+#	* Перепроверить функции start и stop на корректность кода
 #	* Переделать функцию config и status на обновлённый код скрипта
 #	Необязательно:
 #		- Внедрить функцию установки в xbin|bin каталог с автозаменой шебанга под текущее устройство
@@ -17,6 +17,7 @@ PREMODZRAM=$(cat /lib/modules/$(uname -r)/modules.dep | grep zram.ko | tr -d ":"
 MODZRAM=$(find /lib/modules/$(uname -r)/$PREMODZRAM -type f) > /dev/null 2>&1
 CORES=$(grep -c ^processor /proc/cpuinfo) > /dev/null 2>&1
 ZNUM=$(ls /sys/block/ | grep -c zram) > /dev/null 2>&1
+
 #echo $MODZRAM
 
 if [ -f /system/bin/sh ]; then
@@ -152,21 +153,11 @@ config () {
 		sleep 2
 
 		#Параметры настройки zram
-		## Определение количества ядер, выставит 1 если не удастся определить
-		if [ ! -f /proc/cpuinfo ]; then
-			echo
-			echo "ВНИМАНИЕ: Не удалось найти /proc/cpuinfo, proc подключен?"
-			echo "		 Используется одно ядро для zramswap..."
-			CORES=1
-		else
-			echo
-			echo "Введите количество устройств ZRAM (Доступно $CORES):"
-			read ZCRE
-			echo "Выбрано значение:" $ZCRE
-			sleep 2
-		fi
-		
-		
+		echo
+		echo "Введите количество устройств ZRAM (Доступно $CORES):"
+		read ZCRE
+		echo "Выбрано значение:" $ZCRE
+		sleep 2
 		
 		echo
 		echo "Введите значение DISKSIZE, в GBytes (Рекомендуется не меньше 4):"
@@ -419,6 +410,25 @@ info () {
 	swapon
 	free | grep -e всего -e Подкачка -e total -e Swap
 	echo
+##
+##	Функционал не функционирует, отключено и возможно будет пофикшено
+##
+#	echo "Отображение текущего состояния ZRAM"
+#	orig_data_size="0"
+#	for file in /sys/block/zram*/*_data_size ; do
+#		if [ $file = "/sys/block/zram*/*_data_size" ]; then
+#			compress_ratio="0"
+#			break
+#		fi
+#		read file_content < $file
+#		what=$(basename $file)
+#		eval "$what=\$(($what + $file_content))"
+#		compress_ratio=$(echo "scale=2; $orig_data_size / $compr_data_size" | bc)
+#	done
+#	echo "compr_data_size: $((compr_data_size / 1024)) KiB"
+#	echo "orig_data_size:  $((orig_data_size  / 1024)) KiB"
+#	echo "compression-ratio: $compress_ratio"
+#
 }
 ## end
 

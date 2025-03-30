@@ -1,0 +1,175 @@
+#!/system/bin/sh
+#
+# TODO:
+# * Migrate to using zramctl from util-linux for the setup,
+#   (this will close debian bug #917643):
+#   then also:
+#   - add option for compression algorythm
+#   - ammount of compression streams
+#   - Make use of the zramctl stats too
+
+## Функция автоматической настройки
+function start {
+    echo
+    echo "Запущен скрипт оптимальной настройки ZRAM"
+    echo "[Параметры запуска: DISKSIZE=4G, SWAPPINESS=95, PRIORITY=98]"
+    sleep 2
+
+    echo
+    echo "Остановка процесса ZRAM, если уже запущен"
+    echo "[Может занять некоторое время]"
+    swapoff /dev/block/zram0 > /dev/null 2>&1
+    echo '1' > /sys/block/zram0/reset
+    echo '0' > /sys/block/zram0/disksize
+    sleep 2
+
+    echo
+    echo "Настройка нового процесса ZRAM"
+    ##Set some defaults:
+    ALLOCATION=4G    # Количество выделенной памяти ZRAM, в GiB
+    PRIORITY=98    # Приоритет SWAP, смотри swapon(2) для деталей
+    SWAPPINESS=95    # Свободная память, при которой ZRAM используется
+
+    echo lz4 > /sys/block/zram0/comp_algorithm
+    echo $ALLOCATION > /sys/block/zram0/disksize
+    echo $SWAPPINESS > /proc/sys/vm/swappiness
+    
+    echo
+    echo "Запуск процесса ZRAM"
+    mkswap /dev/block/zram0 > /dev/null 2>&1
+    swapon -p $PRIORITY /dev/block/zram0 > /dev/null 2>&1
+    sleep 2
+
+    echo
+    echo "Выполнение завершено. ZRAM запущен"
+    echo
+}
+## end
+
+## Функция ручной настройки
+function config {
+    echo
+    echo "Запущен скрипт ручной настройки ZRAM"
+    echo "[Если скрипт запущен по ошибке, используйте CTRL+C для отмены]"
+    sleep 3
+
+    echo
+    echo "Требуется ввести некоторые параметры"
+    sleep 2
+
+    #Параметры настройки zram
+    echo
+    echo "Введите значение DISKSIZE (Рекомендуется не меньше 4G):"
+    echo "[Справка: DISKSIZE - Это значение, определяющее количество памяти в ZRAM]"
+    read MEM
+    echo "Выбрано значение:" $MEM
+    sleep 2
+
+    echo
+    echo "Введите значение SWAPPINESS (Рекомендуется 60-85):"
+    echo "[Справка: SWAPPINESS - Это процент СВОБОДНОЙ оперативной памяти, при котором система использует ZRAM]"
+    read SPNS
+    echo Выбрано значение: $SPNS
+    sleep 2
+
+    echo
+    echo "Остановка процесса ZRAM, если уже запущен"
+    echo "[Может занять некоторое время]"
+    swapoff /dev/block/zram0 > /dev/null 2>&1
+    echo '1' > /sys/block/zram0/reset
+    echo '0' > /sys/block/zram0/disksize
+    sleep 2
+    
+    echo
+    echo "Настройка нового процесса ZRAM"
+    ##Set some defaults:
+    ALLOCATION=$MEM    # Количество выделенной памяти в ZRAM, в GiB
+    PRIORITY=100    # Приоритет SWAP, смотри swapon(2) для деталей
+    SWAPPINESS=$SPNS    # Свободная память, при которой ZRAM используется
+    
+    echo lz4 > /sys/block/zram0/comp_algorithm
+    echo $ALLOCATION > /sys/block/zram0/disksize
+    echo $SWAPPINESS > /proc/sys/vm/swappiness
+
+    echo
+    echo "Запуск процесса ZRAM"
+    mkswap /dev/block/zram0 > /dev/null 2>&1
+    swapon -p $PRIORITY /dev/block/zram0 > /dev/null 2>&1
+
+    echo
+    echo "Выполнение завершено. ZRAM запущен"
+    echo
+}
+## end
+
+## Показывает текущее состояние ZRAM
+function status {
+    echo
+    echo "Данная функция на данный момент неработоспособна"
+#    echo "Отображение текущего состояния ZRAM"
+#    echo
+#    orig_data_size="0"
+#    for file in /sys/block/zram0/*_data_size ; do
+#        if [ $file = "/sys/block/zram0/*_data_size" ]; then
+#            compress_ratio="0"
+#            break
+#        fi
+#        read file_content < $file
+#        what=$(basename $file)
+#        eval "$what=\$(($what + $file_content))"
+#        compress_ratio=$(echo "scale=2; $orig_data_size / $compr_data_size" | bc)
+#    done
+#    echo "compr_data_size: $((compr_data_size / 1024)) KiB"
+#    echo "orig_data_size:  $((orig_data_size  / 1024)) KiB"
+#    echo "compression-ratio: $compress_ratio"
+    echo
+}
+## end
+
+## Отключение ZRAM
+function stop {
+    echo
+    echo "Запущен скрипт остановки ZRAM"
+    echo "[Процесс может занять некоторое время]"
+    swapoff /dev/block/zram0 > /dev/null 2>&1
+    echo '1' > /sys/block/zram0/reset
+    echo '0' > /sys/block/zram0/disksize
+    sleep 2
+
+    echo
+    echo "Выполнение завершено. ZRAM отключен"
+    echo
+}
+## end
+
+## Выводит справку
+function help {
+    echo
+    echo "Использование:"
+    echo "   zramswap start - Запускает ZRAM с оптимальной настройкой"
+    echo "   zramswap config - Запускает ручную настройку ZRAM"
+    echo "   zramswap stop - Отключает ZRAM"
+    echo "   zramswap status - Выводит текущий статус ZRAM [Не работает]"
+    echo
+}
+## end
+
+if [ "$1" = "start" ]; then
+    start
+fi
+
+if [ "$1" = "config" ]; then
+    config
+fi
+
+if [ "$1" = "stop" ]; then
+    stop
+fi
+
+if [ "$1" = "status" ]; then
+    status
+fi
+
+if [ "$1" = "" ]; then
+    help
+fi

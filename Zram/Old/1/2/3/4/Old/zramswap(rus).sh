@@ -1,14 +1,13 @@
 #!/bin/sh 
 
-# Универсальный скрипт ZRAM для андроида и линукса
-## Версия 1.2
+#
 # МОДИФИЦИРОВАННАЯ ВЕРСИЯ
 # MY TODO:
-#	* Перепроверить функции на корректное фунционирование на разных устройствах и прошивках
-#	* Переделать функцию config и status на обновлённый код скрипта
-#	Необязательно:
-#		- Внедрить функцию установки в xbin|bin каталог с автозаменой шебанга под текущее устройство
-#		- Добавить функции создания и|или использования файла настройки
+#   * Перепроверить функции start и stop на корректность кода
+#   * Переделать функцию config и status на обновлённый код скрипта
+#   Необязательно:
+#	   - Внедрить функцию установки в xbin|bin каталог с автозаменой шебанга под текущее устройство
+#	   - Добавить функции создания и|или использования файла настройки
 #
 
 USER=$(whoami) > /dev/null 2>&1
@@ -17,8 +16,8 @@ PREMODZRAM=$(cat /lib/modules/$(uname -r)/modules.dep | grep zram.ko | tr -d ":"
 MODZRAM=$(find /lib/modules/$(uname -r)/$PREMODZRAM -type f) > /dev/null 2>&1
 CORES=$(grep -c ^processor /proc/cpuinfo) > /dev/null 2>&1
 ZNUM=$(ls /sys/block/ | grep -c zram) > /dev/null 2>&1
-#echo $MODZRAM
 
+#echo $MODZRAM
 if [ -f /system/bin/sh ]; then
 	DEVZR="/dev/block"
 else
@@ -27,8 +26,8 @@ fi
 #echo $DEVZR
 
 ## Функция автоматической настройки
-startAuto () {
-	[ "$USER" = root ] || { echo && echo "	[Эта команда требует запуск от root]"; exit 1;}
+start () {
+	[ "$USER" = root ] || { echo && echo "   [Эта команда требует запуск от root]"; exit 1;}
 	CHECKDEV="0"
 	if [ -f "$MODZRAM" ]; then
 		echo
@@ -138,7 +137,7 @@ startLT () {
 
 ## Функция ручной настройки
 config () {
-	[ "$USER" = root ] || { echo && echo "	[Эта команда требует запуск от root]"; exit 1;}
+	[ "$USER" = root ] || { echo && echo "   [Эта команда требует запуск от root]"; exit 1;}
 	CHECKDEV=0
 	if [ -f "$MODZRAM" ]; then
 		echo
@@ -152,22 +151,6 @@ config () {
 		sleep 2
 
 		#Параметры настройки zram
-		## Определение количества ядер, выставит 1 если не удастся определить
-		if [ ! -f /proc/cpuinfo ]; then
-			echo
-			echo "ВНИМАНИЕ: Не удалось найти /proc/cpuinfo, proc подключен?"
-			echo "		 Используется одно ядро для zramswap..."
-			CORES=1
-		else
-			echo
-			echo "Введите количество устройств ZRAM (Доступно $CORES):"
-			read ZCRE
-			echo "Выбрано значение:" $ZCRE
-			sleep 2
-		fi
-		
-		
-		
 		echo
 		echo "Введите значение DISKSIZE, в GBytes (Рекомендуется не меньше 4):"
 		echo "[Справка: DISKSIZE - Это значение, определяющее количество памяти в ZRAM]"
@@ -191,10 +174,23 @@ config () {
 		PRIORITY=100	# Приоритет SWAP, смотри swapon(2) для деталей
 		SWAPPINESS=$SPNS	# Значение интенсивности работы ZRAM
 		echo
-		echo "[Параметры запуска: ZramDevs=$ZCRE, DISKSIZE=$MEM GBytes, SWAPPINESS=$SWAPPINESS, PRIORITY=$PRIORITY]"
+		echo "[Параметры запуска: DISKSIZE="$MEM "GBytes, SWAPPINESS="$SWAPPINESS", PRIORITY="$PRIORITY"]"
+
+		## Определение количества ядер, выставит 1 если не удастся определить
+		if [ ! -f /proc/cpuinfo ]; then
+			echo
+			echo "ВНИМАНИЕ: Не удалось найти /proc/cpuinfo, proc подключен?"
+			echo "		 Используется одно ядро для zramswap..."
+			CORES=1
+		else
+			if [ "$CORES" -gt "4" ]; then
+				CORES=$(($CORES / 2))
+			else
+				CORES=$CORES
+			fi
+		fi
 
 		echo "Запуск процессов ZRAM"
-		CORES=$ZCRE
 		modprobe zram num_devices=$CORES
 		echo $SWAPPINESS > /proc/sys/vm/swappiness
 		for CORE in $(seq 0 $(($CORES - 1))); do
@@ -267,7 +263,7 @@ config () {
 
 ## Отключение ZRAM
 stop () {
-	[ "$USER" = root ] || { echo && echo "	[Эта команда требует запуск от root]"; exit 1;}
+	[ "$USER" = root ] || { echo && echo "   [Эта команда требует запуск от root]"; exit 1;}
 
 	if [ -f "$MODZRAM" ]; then
 		if [ $(lsmod | grep zram | wc -l) -gt 0 ]; then
@@ -322,7 +318,7 @@ stopLT () {
 
 ## Добавление устройства ZRAM
 addev () {
-	[ "$USER" = root ] || { echo && echo "	[Эта команда требует запуск от root]"; exit 1;}
+	[ "$USER" = root ] || { echo && echo "   [Эта команда требует запуск от root]"; exit 1;}
 	if [ -d $ZRDR ]; then
 		echo && echo "[Внимание, функция находится в тестировании]"
 		sleep 2
@@ -358,7 +354,7 @@ addev () {
 ## end
 ## Добавление устройств ZRAM по количеству потоков CPU
 maxdev () {
-	[ "$USER" = root ] || { echo && echo "	[Эта команда требует запуск от root]"; exit 1;}
+	[ "$USER" = root ] || { echo && echo "   [Эта команда требует запуск от root]"; exit 1;}
 	if [ -d $ZRDR ]; then
 		echo && echo "[Внимание, функция находится в тестировании]"
 		sleep 2
@@ -377,7 +373,7 @@ maxdev () {
 ## end
 ## Удаление устройств ZRAM по количеству
 rmdev () {
-	[ "$USER" = root ] || { echo && echo "	[Эта команда требует запуск от root]"; exit 1;}
+	[ "$USER" = root ] || { echo && echo "   [Эта команда требует запуск от root]"; exit 1;}
 	if [ -d $ZRDR ]; then
 		[ "$ZNUM" -gt "1" ] || { echo && echo "Требуется добавить устройство ZRAM. Используйте функцию 'addev' или 'addev max'" && echo; exit 1;}
 		echo && echo "[Внимание, функция находится в тестировании]"
@@ -419,6 +415,25 @@ info () {
 	swapon
 	free | grep -e всего -e Подкачка -e total -e Swap
 	echo
+##
+##	Функционал не функционирует, отключено и возможно будет пофикшено
+##
+#	echo "Отображение текущего состояния ZRAM"
+#	orig_data_size="0"
+#	for file in /sys/block/zram*/*_data_size ; do
+#		if [ $file = "/sys/block/zram*/*_data_size" ]; then
+#			compress_ratio="0"
+#			break
+#		fi
+#		read file_content < $file
+#		what=$(basename $file)
+#		eval "$what=\$(($what + $file_content))"
+#		compress_ratio=$(echo "scale=2; $orig_data_size / $compr_data_size" | bc)
+#	done
+#	echo "compr_data_size: $((compr_data_size / 1024)) KiB"
+#	echo "orig_data_size:  $((orig_data_size  / 1024)) KiB"
+#   echo "compression-ratio: $compress_ratio"
+#
 }
 ## end
 
@@ -443,21 +458,21 @@ rmdevSRV () {
 help () {
 	echo
 	echo "Использование:"
-	echo "	zramswap start - [ROOT] Запускает ZRAM с оптимальной настройкой"
-	echo "	zramswap config - [ROOT] Запускает ручную настройку ZRAM"
-	echo "	zramswap stop - [ROOT] Отключает ZRAM"
-	echo "	zramswap addev - (TEST) [ROOT] Добавляет устройство ZRAM"
-	echo "		 >>addev max - (TEST) [ROOT] Добавляет по количеству потоков CPU"
-	echo "	zramswap rmdev - (TEST) [ROOT] Убирает устройство ZRAM"
-	echo "	zramswap info - Выводит текущий статус ZRAM"
-	echo "	zramswap help - Выводит данную справку"
+	echo "   zramdroid start - [ROOT] Запускает ZRAM с оптимальной настройкой"
+	echo "   zramdroid config - [ROOT] Запускает ручную настройку ZRAM"
+	echo "   zramdroid stop - [ROOT] Отключает ZRAM"
+	echo "   zramdroid addev - (TEST) [ROOT] Добавляет устройство ZRAM"
+	echo "       >>addev max - (TEST) [ROOT] Добавляет по количеству потоков CPU"
+	echo "   zramdroid rmdev - (TEST) [ROOT] Убирает устройство ZRAM"
+	echo "   zramdroid info - Выводит текущий статус ZRAM"
+	echo "   zramdroid help - Выводит данную справку"
 	echo
 }
 ## end
 
 
-if [ "$1" = "start" ]; then startAuto;
-	#if ! [ "$2" = "lite" ]; then startAuto; else startLT; fi
+if [ "$1" = "start" ]; then
+#	if ! [ "$2" = "lite" ]; then start; else startLT; fi
 elif [ "$1" = "config" ]; then config;
 elif [ "$1" = "stop" ]; then stop;
 elif [ "$1" = "addev" ]; then 
@@ -466,7 +481,7 @@ elif [ "$1" = "rmdev" ]; then rmdev;
 elif [ "$1" = "info" ]; then info;
 elif [ "$1" = "help" ]; then help;
 elif [ "$1" = "" ]; then
-	echo && echo " Команда отсутствует. Введите «zramswap help» для получения справки" && echo
+	echo && echo " Команда отсутствует. Введите «zramdroid help» для получения справки" && echo
 elif ! [ "$1" = "help" ]; then
-	echo && echo " Неправильная команда. Введите «zramswap help» для получения справки" && echo
+	echo && echo " Неправильная команда. Введите «zramdroid help» для получения справки" && echo
 fi
