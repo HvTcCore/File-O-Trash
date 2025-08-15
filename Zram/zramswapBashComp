@@ -1,4 +1,6 @@
-_zramswapBash()
+# zramswap(1) completion                                         -*- shell-script -*-
+
+_zramswap()
 {
 	local cur prev
 
@@ -22,6 +24,7 @@ _zramswapBash()
 
 	COMPREPLY=($(compgen -W "$words" -- $cur))
 	return 0
-}
+} &&
+	complete -F _zramswap zramswap
 
-complete -F _zramswapBash zramswap   
+# ex: filetype=sh
