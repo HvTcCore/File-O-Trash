@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="ru">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width,initial-scale=1" />
+		<title>NotTetris</title>
+		<style>
+			:root{
+				--bg:#071018;
+				--panel:#0f1720;
+				--muted:#7f8fa6;
+				--accent:#7BD389;
+				--card:#0d1419;
+				--border:#16202a;
+				--white:#dbe9f8;
+			}
+			html,body{height:100%;margin:0;font-family:Inter, "Segoe UI", Roboto, monospace;background:var(--bg);color:var(--white);-webkit-font-smoothing:antialiased}
+			.wrap{
+				position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+			}
+			canvas{
+				background:transparent;
+				display:block;
+				max-width:95vw;
+				max-height:80vh;
+				image-rendering: pixelated;
+			}
+			@media (max-width:640px){
+				canvas{ width:95vw; height:75vh; }
+			}
+		</style>
+	</head>
+	<body>
+		<div class="wrap">
+			<canvas id="c"></canvas>
+		</div>
+
+		<script>
+		'use strict';
+		const canvas = document.getElementById('c');
+		const g = canvas.getContext('2d');
+
+		/* logical constants (originally) */
+		const BASE_W = 820, BASE_H = 600;
+
+		/* Trim from right/bottom relative to BASE (tweak these to move red lines) */
+		const RIGHT_TRIM = 192; // example: right edge cut
+		const BOTTOM_TRIM = 56; // example: bottom edge cut
+
+		/* Compute outer frame (жёстко задана) */
+		const outerRect = { x: 10, y: 8, w: BASE_W - RIGHT_TRIM, h: BASE_H - BOTTOM_TRIM };
+
+		/* Derive LOGICAL canvas size from outerRect so logic matches visible frame */
+		const LOGICAL_W = outerRect.x + outerRect.w + outerRect.x;
+		const LOGICAL_H = outerRect.y + outerRect.h + outerRect.y;
+
+		/* Layout inside logical coords */
+		const blockSize = 28;
+		const nRows = 18;
+		const nCols = 12;
+		const leftMargin = 46;
+		const topMargin = 40;
+
+		/* gridRect wide */
+		const rightGridWExtra = 3;
+		const gridRect = { x: leftMargin, y: topMargin, w: blockSize * (nCols - 2) + rightGridWExtra, h: blockSize * (nRows - 1) };
+		const leftGap = gridRect.x - outerRect.x;
+		const previewRect = { x: gridRect.x + gridRect.w + leftGap, y: 70, w: 240, h: 180 };
+		const previewCenter = { x: previewRect.x + previewRect.w/2, y: previewRect.y + previewRect.h/2 };
+		const scoreX = previewRect.x, scoreY = 280;
+
+		/* Shifts for blocks */
+		const blockShiftX = rightGridWExtra - 1; // moving all blocks to right by same value
+		const blockShiftY = -1; // up 1px
+
+		/* Blocks: Z, S, I, T, O, L, J */
+		const colors = [
+		  '#D24D4D', // Z - warm muted red
+		  '#2EA36A', // S - soft green
+		  '#00A6B8', // I - moderate cyan (not too bright)
+		  '#7C59C8', // T - muted purple
+		  '#D9B44A', // Square (O) - warm muted yellow
+		  '#D47A1A', // L - dark orange
+		  '#2265B8'  // J - dark blue
+		];
+		const squareBorder = 'rgba(255,255,255,0.08)';
+		const bgColor = '#071018';
+		const gridColor = '#0b1520';
+		const gridBorderColor = '#16202a';
+		const textColor = '#dbe9f8';
+		const muted = '#7f8fa6';
+
+		/* Game state */
+		const EMPTY = -1, BORDER = -2;
+		let grid = [];
+		let fallingShape = null;
+		let nextShape = null;
+		let fallingShapeRow = 1, fallingShapeCol = 5;
+		let softDrop = false;
+		const SOFT_INTERVAL = 60;
+		let lastGravityTime = -1, lastSoftTime = -1;
+
+		/* New: paused flag */
+		let paused = false;
+
+		/* Shapes */
+		function Shape(shape, o){ this.shape = shape; this.pos = this.reset(); this.ordinal = o; }
+		const Shapes = {
+			ZShape: [[0,-1],[0,0],[-1,0],[-1,1]],
+			SShape: [[0,-1],[0,0],[1,0],[1,1]],
+			IShape: [[0,-1],[0,0],[0,1],[0,2]],
+			TShape: [[-1,0],[0,0],[1,0],[0,1]],
+			Square: [[0,0],[1,0],[0,1],[1,1]],
+			LShape: [[-1,-1],[0,-1],[0,0],[0,1]],
+			JShape: [[1,-1],[0,-1],[0,0],[0,1]]
+		};
+		function getRandomShape(){ const keys = Object.keys(Shapes); const ord = Math.floor(Math.random()*keys.length); const shape = Shapes[keys[ord]]; return new Shape(shape, ord); }
+		Shape.prototype.reset = function(){ this.pos = new Array(4); for(let i=0;i<4;i++) this.pos[i] = this.shape[i].slice(); return this.pos; };
+
+		/* Grid init */
+		function initGrid(){
+			grid = [];
+			for(let r=0;r<nRows;r++){
+				grid[r] = new Array(nCols);
+				for(let c=0;c<nCols;c++) grid[r][c] = EMPTY;
+			}
+			for(let r=0;r<nRows;r++){
+				for(let c=0;c<nCols;c++){
+					if(c===0 || c===nCols-1 || r===nRows-1) grid[r][c] = BORDER;
+				}
+			}
+		}
+
+		/* Movement & collision */
+		function canMove(s, dir){
+			return s.pos.every(function(p){
+				const newCol = fallingShapeCol + dir.x + p[0];
+				const newRow = fallingShapeRow + dir.y + p[1];
+				return grid[newRow] && grid[newRow][newCol] === EMPTY;
+			});
+		}
+		function move(dir){ fallingShapeRow += dir.y; fallingShapeCol += dir.x; }
+		const right = {x:1,y:0}, left={x:-1,y:0}, down={x:0,y:1};
+
+		function canRotate(s){
+			if(s === Shapes.Square) return false;
+			const pos = s.pos.map(p => p.slice());
+			pos.forEach(function(row){ const tmp = row[0]; row[0] = row[1]; row[1] = -tmp; });
+			return pos.every(function(p){
+				const newCol = fallingShapeCol + p[0], newRow = fallingShapeRow + p[1];
+				return grid[newRow] && grid[newRow][newCol] === EMPTY;
+			});
+		}
+		function rotate(s){
+			if(s === Shapes.Square) return;
+			s.pos.forEach(function(row){ const tmp = row[0]; row[0] = row[1]; row[1] = -tmp; });
+		}
+
+		/* Place shape, remove lines */
+		function addShape(s){
+			s.pos.forEach(function(p){
+				grid[fallingShapeRow + p[1]][fallingShapeCol + p[0]] = s.ordinal;
+			});
+		}
+		function removeLine(line){
+			for(let c=0;c<nCols;c++) grid[line][c] = EMPTY;
+			for(let c=0;c<nCols;c++){
+				for(let r=line;r>0;r--) grid[r][c] = grid[r-1][c];
+			}
+		}
+		function removeLines(){
+			let count = 0;
+			for(let r=0;r<nRows-1;r++){
+				let full = true;
+				for(let c=1;c<nCols-1;c++){
+					if(grid[r][c] === EMPTY){ full = false; break; }
+				}
+				if(full){ count++; removeLine(r); }
+			}
+			return count;
+		}
+		function shapeHasLanded(){
+			addShape(fallingShape);
+			if(fallingShapeRow < 2){
+				scoreboard.setGameOver();
+				scoreboard.setTopscore();
+			} else {
+				const lines = removeLines();
+				scoreboard.addLines(lines);
+			}
+			selectShape();
+		}
+
+		/* Shape selection */
+		function selectShape(){
+			fallingShapeRow = 1;
+			fallingShapeCol = 5;
+			if(!nextShape) nextShape = getRandomShape();
+			fallingShape = nextShape;
+			nextShape = getRandomShape();
+			if(fallingShape) fallingShape.reset();
+		}
+
+		/* Draw helpers */
+		function fillRect(r, color){ g.fillStyle = color; g.fillRect(r.x, r.y, r.w, r.h); }
+		function drawRect(r, color, lw=3){ g.lineWidth = lw; g.strokeStyle = color; g.strokeRect(r.x + 0.5, r.y + 0.5, r.w, r.h); }
+
+		/* Drawing a grid square - reduced gap (inner = 1) and coordinate rounding */
+		function drawSquareByGrid(colorIndex, rowIndex, colIndex){
+			if (rowIndex < 0) return;
+			if (colIndex <= 0 || colIndex >= nCols-1) return;
+			const bs = blockSize;
+			const inner = 1; // minimal gap between blocks
+			const x = Math.round(gridRect.x + (colIndex - 1) * bs) + blockShiftX;
+			const y = Math.round(gridRect.y + rowIndex * bs) + blockShiftY;
+			/* crop on top (don't draw anything if it's outside the crop): */
+			if (y + bs - 1 < gridRect.y) return;
+			const size = Math.max(1, bs - inner * 2);
+			g.fillStyle = colors[colorIndex];
+			g.fillRect(x + inner, y + inner, size, size);
+			g.lineWidth = 1;
+			g.strokeStyle = squareBorder;
+			g.strokeRect(x + inner + 0.5, y + inner + 0.5, size, size);
+		}
+
+		/* Make the same edit in drawSquarePixel (for previewing shapes): */
+		function drawSquarePixel(colorIndex, px, py, size = blockSize){
+			const inner = 1;
+			const drawSize = Math.max(1, size - inner * 2);
+			const rx = Math.round(px) + blockShiftX;
+			const ry = Math.round(py) + blockShiftY;
+			g.fillStyle = colors[colorIndex];
+			g.fillRect(rx + inner, ry + inner, drawSize, drawSize);
+			g.lineWidth = 1;
+			g.strokeStyle = squareBorder;
+			g.strokeRect(rx + inner + 0.5, ry + inner + 0.5, drawSize, drawSize);
+		}
+
+		/* UI */
+		function drawUI(){
+			fillRect(outerRect, bgColor);
+			fillRect(gridRect, gridColor);
+			drawRect(gridRect, gridBorderColor, 3);
+			drawRect(outerRect, gridBorderColor, 4);
+
+			for(let r=0;r<nRows;r++){
+				for(let c=0;c<nCols;c++){
+					const idx = grid[r][c];
+					if(idx > EMPTY) drawSquareByGrid(idx, r, c);
+				}
+			}
+
+			drawRect(previewRect, gridBorderColor, 2);
+
+			g.fillStyle = muted; g.font = '600 14px monospace';
+			g.fillText('HISCORE', scoreX, scoreY);
+			g.fillStyle = textColor; g.fillText(String(scoreboard.getTopscore()), scoreX+110, scoreY);
+			g.fillStyle = muted; g.fillText('LEVEL', scoreX, scoreY+30);
+			g.fillStyle = textColor; g.fillText(String(scoreboard.getLevel()), scoreX+110, scoreY+30);
+			g.fillStyle = muted; g.fillText('LINES', scoreX, scoreY+60);
+			g.fillStyle = textColor; g.fillText(String(scoreboard.getLines()), scoreX+110, scoreY+60);
+			g.fillStyle = muted; g.fillText('SCORE', scoreX, scoreY+90);
+			g.fillStyle = textColor; g.fillText(String(scoreboard.getScore()), scoreX+110, scoreY+90);
+
+			if(nextShape){
+				const pos = nextShape.pos;
+				let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+				pos.forEach(p => { minX = Math.min(minX, p[0]); minY = Math.min(minY, p[1]); maxX = Math.max(maxX, p[0]); maxY = Math.max(maxY, p[1]); });
+				const widthUnits = maxX - minX + 1;
+				const heightUnits = maxY - minY + 1;
+				const size = Math.min( (previewRect.w - 20)/widthUnits, (previewRect.h - 20)/heightUnits, blockSize );
+				const startX = previewCenter.x - (widthUnits * size)/2 - minX * size;
+				const startY = previewCenter.y - (heightUnits * size)/2 - minY * size;
+				pos.forEach(function(p){
+					const px = startX + p[0]*size;
+					const py = startY + p[1]*size;
+					drawSquarePixel(nextShape.ordinal, px, py, size);
+				});
+			}
+		}
+
+		/* Paused overlay */
+		function drawPausedOverlay(){
+			/* translucent overlay covering outerRect */
+			g.fillStyle = 'rgba(0,0,0,0.35)';
+			g.fillRect(outerRect.x + 2, outerRect.y + 2, outerRect.w - 4, outerRect.h - 4);
+
+			/* "Paused" centered inside gridRect */
+			const txt = 'PAUSED';
+			g.font = '700 26px monospace';
+			g.fillStyle = '#dbe9f8';
+			const tw = g.measureText(txt).width;
+			const tx = gridRect.x + Math.round((gridRect.w - tw)/2);
+			const ty = gridRect.y + Math.round(gridRect.h/2);
+			g.fillText(txt, tx, ty);
+
+			/* Hint */
+			g.font = '500 12px monospace';
+			g.fillStyle = muted;
+			const hint = 'Press Escape to resume';
+			const hw = g.measureText(hint).width;
+			const hx = gridRect.x + Math.round((gridRect.w - hw)/2);
+			const hy = ty + 28;
+			g.fillText(hint, hx, hy);
+		}
+
+		/* Falling */
+		function drawFallingShape(){
+			if(!fallingShape) return;
+			const idx = fallingShape.ordinal;
+			fallingShape.pos.forEach(function(p){
+				const r = fallingShapeRow + p[1];
+				const c = fallingShapeCol + p[0];
+				drawSquareByGrid(idx, r, c);
+			});
+		}
+
+		/* Start screen */
+		const clickRect = { w: 260, h: 44, x:0, y:0 };
+		function computeClickRect(){
+			clickRect.x = gridRect.x + Math.round((gridRect.w - clickRect.w)/2);
+			clickRect.y = gridRect.y + Math.round((gridRect.h - clickRect.h)/2);
+		}
+		function drawStartScreen(){
+			computeClickRect();
+			g.fillStyle = 'rgba(255,255,255,0.02)';
+			g.fillRect(gridRect.x + 8, gridRect.y + 8, gridRect.w - 16, gridRect.h - 16);
+
+			g.fillStyle = 'rgba(255,255,255,0.03)';
+			g.fillRect(clickRect.x, clickRect.y, clickRect.w, clickRect.h);
+			g.lineWidth = 1; g.strokeStyle = 'rgba(255,255,255,0.06)';
+			g.strokeRect(clickRect.x, clickRect.y, clickRect.w, clickRect.h);
+
+			g.fillStyle = textColor; g.font = '600 18px monospace';
+			const txt = 'Click to start';
+			const tw = g.measureText(txt).width;
+			const tx = clickRect.x + Math.round((clickRect.w - tw)/2);
+			const ty = clickRect.y + 28;
+			g.fillText(txt, tx, ty);
+
+			g.font = '500 12px monospace';
+			g.fillStyle = muted;
+			const hint = 'Arrows: move\t•\tUp: rotate\t•\tDown/Space: drop';
+			const hw = g.measureText(hint).width;
+			const hx = gridRect.x + Math.round((gridRect.w - hw)/2);
+			const hy = clickRect.y + clickRect.h + 26;
+			g.fillText(hint, hx, hy);
+		}
+
+		/* Animation loop */
+		let animReq = null;
+		function animate(){
+			animReq = requestAnimationFrame(animate);
+			const now = Date.now();
+
+			/* while paused: keep rendering overlay but don't advance gravity/soft-drop/logic */
+			if(paused){
+				/* ensure softDrop doesn't remain true while paused */
+				softDrop = false;
+				draw();
+				return;
+			}
+
+			if(scoreboard.isGameOver()) return;
+
+			/* soft drop */
+			if(softDrop){
+				if(lastSoftTime + SOFT_INTERVAL < now){
+					if(canMove(fallingShape, down)) move(down);
+					else shapeHasLanded();
+					lastSoftTime = now;
+					draw();
+				}
+			}
+
+			/* normal gravity */
+			if(lastGravityTime + scoreboard.getSpeed() < now){
+				if(!softDrop || (softDrop && (now - lastSoftTime) > 10)){
+					if(canMove(fallingShape, down)) move(down);
+					else shapeHasLanded();
+					draw();
+					lastGravityTime = now;
+				}
+			}
+		}
+
+		/* Start game */
+		function startNewGame(){
+			initGrid();
+			selectShape();
+			scoreboard.reset();
+			lastGravityTime = Date.now();
+			lastSoftTime = Date.now();
+			paused = false;
+			if(animReq) cancelAnimationFrame(animReq);
+			animReq = requestAnimationFrame(animate);
+			draw();
+		}
+
+		/* Input handling */
+		addEventListener('keydown', function(ev){
+			/* toggle pause on Escape (works during game) */
+			if(ev.key === 'Escape' || ev.key === 'Esc'){
+				/* If on start screen / gameOver, do nothing (or could treat as resume) */
+				if(!scoreboard.isGameOver()){
+					paused = !paused;
+					/* if paused, ensure soft drop stops */
+					if(paused) softDrop = false;
+					draw();
+				}
+				/* consume event */
+				ev.preventDefault();
+				return;
+			}
+
+			/* If game is over / at start - ignore controls */
+			if(scoreboard.isGameOver() || paused) return;
+
+			switch(ev.key){
+				case 'ArrowUp': case 'w':
+					if(canRotate(fallingShape)) rotate(fallingShape); break;
+				case 'ArrowLeft': case 'a':
+					if(canMove(fallingShape,left)) move(left); break;
+				case 'ArrowRight': case 'd':
+					if(canMove(fallingShape,right)) move(right); break;
+				case 'ArrowDown': case 's':
+					/* enable soft drop on hold */
+					softDrop = true;
+					break;
+				case ' ':
+					/* hard drop (space) */
+					while(canMove(fallingShape, down)) move(down);
+					shapeHasLanded();
+					break;
+			}
+			draw();
+		});
+		addEventListener('keyup', function(ev){
+			if(ev.key === 'ArrowDown' || ev.key === 's') softDrop = false;
+		});
+
+		/* Click only starts when clicking center block (coords converted to logical LOGICAL_W/LOGICAL_H) */
+		canvas.addEventListener('click', function(e){
+			const rect = canvas.getBoundingClientRect();
+			const logicalX = (e.clientX - rect.left) * (LOGICAL_W / rect.width);
+			const logicalY = (e.clientY - rect.top) * (LOGICAL_H / rect.height);
+
+			if(scoreboard.isGameOver()){
+				computeClickRect();
+				if(logicalX >= clickRect.x && logicalX <= clickRect.x + clickRect.w && logicalY >= clickRect.y && logicalY <= clickRect.y + clickRect.h){
+					startNewGame();
+				}
+			}
+		});
+
+		/* Draw orchestrator */
+		function draw(){
+			g.clearRect(0,0,LOGICAL_W,LOGICAL_H);
+			drawUI();
+			if(scoreboard.isGameOver()){
+				drawStartScreen();
+			} else {
+				drawFallingShape();
+				if(paused) drawPausedOverlay();
+			}
+		}
+
+		/* Scoreboard with persistent HiScore */
+		function Scoreboard(){
+			this.MAXLEVEL = 9;
+			let level = 0, lines = 0, score = 0, topscore = 0, gameOver = true;
+			const STORAGE_KEY = 'tetris_hiscore_v1';
+			const stored = parseInt(localStorage.getItem(STORAGE_KEY) || '0', 10);
+			if(!isNaN(stored)) topscore = stored;
+			this.reset = function(){
+				this.setTopscore();
+				level = lines = score = 0;
+				gameOver = false;
+			};
+			this.setGameOver = function(){ gameOver = true; };
+			this.isGameOver = function(){ return gameOver; };
+			this.setTopscore = function(){
+				if(score > topscore){ topscore = score; localStorage.setItem(STORAGE_KEY, String(topscore)); }
+			};
+			this.getTopscore = function(){ return topscore; };
+			this.getSpeed = function(){
+				switch(level){
+					case 0: return 700; case 1: return 600; case 2: return 500; case 3: return 400;
+					case 4: return 350; case 5: return 300; case 6: return 250; case 7: return 200;
+					case 8: return 150; case 9: return 100; default: return 100;
+				}
+			};
+			this.addScore = function(sc){ score += sc; };
+			this.addLines = function(line){
+				switch(line){
+					case 1: this.addScore(10); break;
+					case 2: this.addScore(20); break;
+					case 3: this.addScore(30); break;
+					case 4: this.addScore(40); break;
+					default: return;
+				}
+				lines += line;
+				if(lines > 10) this.addLevel();
+			};
+			this.addLevel = function(){ lines %= 10; if(level < this.MAXLEVEL) level++; };
+			this.getLevel = function(){ return level; };
+			this.getLines = function(){ return lines; };
+			this.getScore = function(){ return score; };
+		}
+		const scoreboard = new Scoreboard();
+
+		/* Resize & DPI-aware scaling - use LOGICAL_W / LOGICAL_H as base */
+		let currentScale = 1;
+		function resizeCanvas(){
+			canvas.style.aspectRatio = LOGICAL_W + '/' + LOGICAL_H;
+
+			const margin = 16;
+			const availW = Math.max(50, window.innerWidth - margin*2);
+			const availH = Math.max(50, window.innerHeight - margin*2);
+
+			const scale = Math.min(1, availW / LOGICAL_W, availH / LOGICAL_H);
+			const DPR = window.devicePixelRatio || 1;
+
+			const displayW = Math.round(LOGICAL_W * scale);
+			const displayH = Math.round(LOGICAL_H * scale);
+			canvas.style.width = displayW + 'px';
+			canvas.style.height = displayH + 'px';
+
+			canvas.width = Math.max(1, Math.round(LOGICAL_W * DPR * scale));
+			canvas.height = Math.max(1, Math.round(LOGICAL_H * DPR * scale));
+
+			g.setTransform(1,0,0,1,0,0);
+			g.scale(DPR * scale, DPR * scale);
+
+			currentScale = scale;
+			draw();
+		}
+
+		/* Init */
+		function init(){
+			initGrid();
+			nextShape = getRandomShape();
+			selectShape();
+			scoreboard.setGameOver(); // show start screen until click
+
+			resizeCanvas();
+			window.addEventListener('resize', resizeCanvas);
+			window.addEventListener('orientationchange', resizeCanvas);
+			draw();
+		}
+		init();
+
+		</script>
+	</body>
+</html>
