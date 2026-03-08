@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width,initial-scale=1" />
+	<title>Tetris New</title>
+	<style>
+		html,body{
+			height:100%;
+			margin:0;
+			font-family:Inter, "Segoe UI", Roboto, monospace;
+			background:#071018;
+			color:#dbe9f8;
+			-webkit-font-smoothing:antialiased;
+		}
+		.wrap{
+			position:fixed; inset:0;
+			display:flex; align-items:center; justify-content:center;
+		}
+		canvas{
+			background:transparent;
+			display:block;
+			max-width:99vw;
+			max-height:99vh;
+			image-rendering: pixelated;
+			box-sizing: border-box;
+			margin:auto;
+		}
+	</style>
+</head>
+<body>
+<div class="wrap">
+	<canvas id="c"></canvas>
+</div>
+<script>
+'use strict';
+
+const boardCols = 10, boardRows = 20, blockSize = 28;
+const margin = 20, gap = 18;
+const BOARD_W = boardCols * blockSize, BOARD_H = boardRows * blockSize;
+const panelW = 200;	// More space for borders right
+const LOGICAL_W = margin*2 + BOARD_W + gap + panelW;
+const LOGICAL_H = margin*2 + BOARD_H;
+const previewCount = 3;
+
+// Borders and color scheme
+	// Palette examples: https://colorhunt.co/palette/071018ff8681ffbabaffc7c7
+const borderColor = "#1E5128";
+const borderThick = 10;
+const borderMedium = 3;
+const borderInner = 2;
+const colors = [
+	"#00A6B8",	// I
+	"#D9B44A",	// Square (O)
+	"#D47A1A",	// L
+	"#2265B8",	// J
+	"#7C59C8",	// T
+	"#2EA36A",	// S
+	"#D24D4D"	// Z
+];
+//const tetroKeys = "IJLOSTZ".split("");
+const tetroKeys = "IOLJTSZ".split("");		// Color fix
+const SRS_SPAWNS = {
+	I:	[[0,1],[1,1],[2,1],[3,1]],
+	O:	[[1,0],[2,0],[1,1],[2,1]],
+	L:	[[2,0],[0,1],[1,1],[2,1]],
+	J:	[[0,0],[0,1],[1,1],[2,1]],
+	T:	[[1,0],[0,1],[1,1],[2,1]],
+	S:	[[1,0],[2,0],[0,1],[1,1]],
+	Z:	[[0,0],[1,0],[1,1],[2,1]]
+};
+const SRS_KICKS = {
+	LJTSZ: [
+		[[0,0],[-1,0],[-1,+1],[0,-2],[-1,-2]],
+		[[0,0],[+1,0],[+1,-1],[0,+2],[+1,+2]],
+		[[0,0],[+1,0],[+1,+1],[0,-2],[+1,-2]],
+		[[0,0],[-1,0],[-1,-1],[0,+2],[-1,+2]],
+	],
+	I: [
+		[[0,0],[-2,0],[+1,0],[-2,-1],[+1,+2]],
+		[[0,0],[-1,0],[+2,0],[-1,+2],[+2,-1]],
+		[[0,0],[+2,0],[-1,0],[+2,+1],[-1,-2]],
+		[[0,0],[+1,0],[-2,0],[+1,-2],[-2,+1]],
+		[[0,0],[+2,0],[-1,0],[+2,+1],[-1,-2]],
+		[[0,0],[+1,0],[-2,0],[+1,-2],[-2,+1]],
+		[[0,0],[-2,0],[+1,0],[-2,-1],[+1,+2]],
+		[[0,0],[-1,0],[+2,0],[-1,+2],[+2,-1]],
+	]
+};
+const SRS_ORIGIN = { I:[1.5,1.5], O:[1,0.5], LJTSZ:[1,1] };
+
+//------- STATE -------
+
+// Movement Tuning
+const DAS = 140;				// Delay before auto-repeat (ms)
+const ARR = 40;					// Repeat rate (ms)
+const SOFT_DROP_SPEED = 35;		// Soft drop speed
+
+let board, score, level, lines, nextBag, currPiece, holdPiece, pieceX, pieceY, pieceR, canHold, gameOver, hiscore, paused, started;
+let newRecord = false;
+let recordBlinkTime = 0;
+
+let holdLeft = false;
+let holdRight = false;
+let holdDown = false;
+let lastMoveTime = 0;
+let lastSoftDropTime = 0;
+let moveDelay = 0;
+let lastFallTime = 0;			// Difficulty fix
+
+function resetGame() {
+	board = Array.from({length: boardRows+4}, ()=>Array(boardCols+2).fill(1));
+	for (let r=0;r<boardRows;r++) for(let c=1;c<=boardCols;c++) board[r][c]=0;
+	score=0; level=1; lines=0; gameOver=false; paused=false; started=false;
+	nextBag = []; fillBag(); nextPiece();
+	holdPiece=undefined; canHold=true;
+	hiscore = +(localStorage.getItem('hiscore_tetris')||0);
+	newRecord = false;
+}
+function fillBag() {
+	let bag = [...tetroKeys];
+	while(bag.length) nextBag.push(bag.splice(Math.floor(Math.random()*bag.length),1)[0]);
+}
+function nextPiece() {
+	while(nextBag.length < previewCount+1) fillBag();
+	currPiece = {type: nextBag.shift(), x:4, y:0, r:0, stored:false};
+	pieceX=currPiece.x; pieceY=currPiece.y; pieceR=currPiece.r; canHold=true;
+	// if (!canPlace(currPiece.type, pieceX, pieceY, pieceR)) gameOver = true;
+	if (!canPlace(currPiece.type, pieceX, pieceY, pieceR)) {
+		gameOver = true;
+
+		if (score > hiscore) {
+			hiscore = score;
+			localStorage.setItem('hiscore_tetris', hiscore);
+			newRecord = true;
+			recordBlinkTime = Date.now();
+		}
+	}
+	lastFallTime = Date.now();		// Difficulty fix
+}
+function canPlace(type, x, y, r) {
+	const shape = SRS_SPAWNS[type];
+	for (let i=0; i<4; ++i) {
+		let [rx, ry] = srsBlockOffset(type, shape[i][0], shape[i][1], r);
+		let xx = x+rx, yy = y+ry;
+		if (yy < 0) continue;
+		if (yy >= boardRows || xx < 1 || xx > boardCols) return false;
+		if (board[yy][xx]) return false;
+	}
+	return true;
+}
+function srsBlockOffset(type, x, y, rot) {
+	let [ox, oy] = SRS_ORIGIN[type] || SRS_ORIGIN.LJTSZ;
+	let dx = x - ox, dy = y - oy, res;
+	switch(rot%4) {
+		case 0: res=[dx,dy]; break;
+		case 1: res=[-dy,dx]; break;
+		case 2: res=[-dx,-dy]; break;
+		case 3: res=[dy,-dx]; break;
+	}
+	return [Math.round(res[0]+ox),Math.round(res[1]+oy)];
+}
+function tryRotate(dir) {
+	if(gameOver||paused||!started) return;
+	if (currPiece.type === 'O') return false;
+	const type = currPiece.type;
+	const kicks = (type==="I") ? SRS_KICKS.I : SRS_KICKS.LJTSZ;
+	const kickIdx = type==="I"
+		? ((pieceR + (dir===1?0:3))%4 + (dir===1?0:4))
+		: (pieceR%4);
+	const shape = SRS_SPAWNS[type];
+	let toR = (pieceR+dir+4)%4;
+	for(let k=0; k<5; ++k){
+		let [dx,dy]=kicks[kickIdx][k], pass=true;
+		for(let i=0;i<4;++i){
+			let [rx, ry] = srsBlockOffset(type,shape[i][0],shape[i][1],toR);
+			let xx=pieceX+dx+rx,yy=pieceY+dy+ry;
+			if(yy<0 || yy>=boardRows || xx<1 || xx>boardCols || board[yy][xx]){pass=false;break;}
+		}
+		if(pass){ pieceX+=dx; pieceY+=dy; pieceR=toR; return true; }
+	}
+	return false;
+}
+function hardDrop() {
+	if (!started) return;
+	while(canPlace(currPiece.type, pieceX, pieceY+1, pieceR)) pieceY++;
+	place();
+}
+function move(dx,dy) {
+	if (!started) return false;
+	let nx = pieceX+dx, ny = pieceY+dy;
+	if(canPlace(currPiece.type,nx,ny,pieceR)) { pieceX=nx; pieceY=ny; return true; }
+	return false;
+}
+function hold() {
+	if(!canHold || !started) return;
+	canHold=false;
+	if(!holdPiece){holdPiece=currPiece.type;nextPiece();}
+	else{
+		let tmp=holdPiece;holdPiece=currPiece.type;currPiece.type=tmp;
+		pieceX=4; pieceY=0; pieceR=0;
+		if(!canPlace(currPiece.type,pieceX,pieceY,pieceR)) gameOver=true;
+	}
+}
+function place(){
+	const shape = SRS_SPAWNS[currPiece.type];
+	for(let i=0;i<4;i++){
+		let [rx,ry]=srsBlockOffset(currPiece.type,shape[i][0],shape[i][1],pieceR);
+		let xx=pieceX+rx,yy=pieceY+ry;
+		if(yy<0 || yy>=boardRows) continue;
+		board[yy][xx]=tetroKeys.indexOf(currPiece.type)+2;
+	}
+	let cleared = 0;
+	for(let r=0; r<boardRows; ++r){
+		let full=true;
+		for(let c=1;c<=boardCols;++c)if(board[r][c]==0){full=false;break;}
+		if(full){
+			cleared++;
+			for(let rr=r;rr>0;--rr)for(let c=1;c<=boardCols;++c)board[rr][c]=board[rr-1][c];
+			for(let c=1;c<=boardCols;++c)board[0][c]=0;
+		}
+	}
+	score += [0,100,300,500,800][cleared]||0;
+	lines += cleared;
+	level = 1 + Math.floor(lines / 10);
+	nextPiece();
+}
+
+//------- DRAW -------
+const canvas = document.getElementById('c'), g=canvas.getContext('2d');
+canvas.width = LOGICAL_W; canvas.height = LOGICAL_H;
+function draw(){
+	g.clearRect(0,0,LOGICAL_W,LOGICAL_H);
+
+	// Outer thick frame
+	drawLTRB(0,0,LOGICAL_W,LOGICAL_H,borderColor,borderThick);
+
+	// Field/frame
+	let fieldX = margin, fieldY = margin;
+	drawLTRB(fieldX-5,fieldY-5,BOARD_W+10,BOARD_H+10,borderColor,borderMedium);
+
+	g.save();
+	g.translate(fieldX, fieldY);
+	g.strokeStyle = "#27303c";
+	for(let r=0;r<=boardRows;r++) {
+		g.beginPath(); g.moveTo(0, r*blockSize); g.lineTo(BOARD_W, r*blockSize); g.stroke();
+	}
+	for(let c=0;c<=boardCols;c++) {
+		g.beginPath(); g.moveTo(c*blockSize, 0); g.lineTo(c*blockSize, BOARD_H); g.stroke();
+	}
+	// Old blocks
+	for(let r=0;r<boardRows;r++)for(let c=1;c<=boardCols;c++){
+		let v=board[r][c];
+		if(v>=2){
+			g.fillStyle=colors[v-2];
+			g.fillRect((c-1)*blockSize+1, r*blockSize+1, blockSize-2, blockSize-2);
+			g.lineWidth=1;
+			g.strokeStyle='rgba(255,255,255,0.075)';
+			g.strokeRect((c-1)*blockSize+1.5,r*blockSize+1.5,blockSize-3,blockSize-3);
+		}
+	}
+	// Ghost piece
+	if(!gameOver&&!paused&&started){
+		let gy = pieceY;
+		while(canPlace(currPiece.type, pieceX, gy+1, pieceR)) gy++;
+		if(gy>pieceY) drawPieceStrict(pieceX,gy,pieceR,currPiece.type, "ghost");
+	}
+	// Active figure
+	if(!gameOver&&!paused&&started) drawPieceStrict(pieceX,pieceY,pieceR,currPiece.type, "main");
+	g.restore();
+
+	// Right panel block (next, hold, stats, controls)
+	let panelX = fieldX + BOARD_W + gap, panelY = margin;
+	let panelH = LOGICAL_H - margin*2;
+	drawLTRB(panelX-4, panelY-5, panelW+8, panelH+10, borderColor, borderMedium);
+
+	// NEXT block
+	let boxH = previewCount*60 + 10;
+	drawLTRB(panelX+1, panelY, panelW-2, boxH, borderColor, borderInner);
+	g.save();
+	g.font = "24px monospace"; g.fillStyle="#93f2f9";
+	g.fillText("NEXT", panelX+15, panelY+26);
+	for(let i=0;i<previewCount;i++){
+		let t=nextBag[i]||nextBag[0];
+		drawMiniPiece(panelX+44, panelY+36+i*50, t);
+	}
+	g.restore();
+
+	// HOLD block
+	let holdBoxY = panelY+boxH+16, holdBoxH = 90;
+	drawLTRB(panelX+1, holdBoxY, panelW-2, holdBoxH, borderColor, borderInner);
+	g.save();
+	g.fillStyle = "#fa9"; g.font = "22px monospace";
+	g.fillText("HOLD", panelX+15, holdBoxY+26);
+	if(holdPiece) drawMiniPiece(panelX+44,holdBoxY+36, holdPiece);
+	g.restore();
+
+	// Statistics block
+	let infoY = holdBoxY+holdBoxH+16, infoH = 88;
+	drawLTRB(panelX+1, infoY, panelW-2, infoH, borderColor, borderInner);
+	g.save();
+	g.fillStyle="#dbe9f8"; g.font="16px monospace";
+	g.fillText(`LINES: ${lines}`, panelX+16, infoY+20);
+	g.fillText(`LEVEL: ${level}`, panelX+16, infoY+40);
+	g.fillText(`SCORE: ${score}`, panelX+16, infoY+60);
+	g.font = "12.2px monospace"; g.fillStyle="#aaa";
+	g.fillText("HISCORE: "+Math.max(hiscore,score), panelX+16, infoY+78);
+	g.font = "12px monospace";
+	g.fillStyle = "#ff8681";
+	g.fillText("Reset HiScore (R)", panelX+16, infoY+100);
+	g.restore();
+
+	// Controls help block
+	let hintsY = infoY+infoH+16;
+	let hints = [
+		"←/→ or A/D : Move",
+		"↓/S : Soft drop",
+		"Space : Hard drop",
+		"↑/W/X : Rotate right",
+		"Z : Rotate left",
+		"C/Shift : Hold",
+		"Esc : Pause"
+	];
+	let hintBoxH = hints.length*18 + 18;
+	drawLTRB(panelX+1, hintsY, panelW-2, hintBoxH, borderColor, borderInner);
+	g.save();
+	g.font = "14px monospace";
+	g.fillStyle='#7efec8';
+	for(let i=0; i<hints.length; i++)
+		g.fillText(hints[i], panelX+15, hintsY+22 + i*18);
+	g.restore();
+
+	// Message before the first start
+	if(!started) {
+		g.save();
+		g.globalAlpha=0.98;
+		g.fillStyle="#12202c";
+		g.fillRect(0,0,LOGICAL_W,LOGICAL_H);
+		g.globalAlpha=1;
+		g.font="bold 32px monospace";
+		g.textAlign="center";
+		g.fillStyle="#ffbabaff";
+		g.fillText("PRESS ANY BUTTON", LOGICAL_W/2, LOGICAL_H/2-20);
+		g.font="bold 18px monospace";
+		g.fillStyle="#ffc7c7aa";
+		g.fillText("or CLICK to start the game", LOGICAL_W/2, LOGICAL_H/2+24);
+		g.textAlign="left";
+		g.restore();
+		return;
+	}
+
+	// Pause/GameOver
+	if(paused && !gameOver) {
+		g.save();
+		g.globalAlpha=0.965;
+		g.fillStyle="#18252c";
+		g.fillRect(0, LOGICAL_H/2-59, LOGICAL_W, 95);
+		g.globalAlpha=1;
+		g.font = "26px monospace";
+		g.fillStyle="#ffc7c7";
+		g.textAlign="center";
+		g.fillText("PAUSE", LOGICAL_W/2, LOGICAL_H/2-13);
+		g.font = "16px monospace";
+		g.fillStyle="#ffbabaff";
+		g.fillText("ESC - Continue", LOGICAL_W/2, LOGICAL_H/2+21);
+		g.textAlign="left";
+		g.restore();
+	}
+	if(gameOver){
+		g.save();
+		g.globalAlpha=0.95;
+		g.fillStyle="#18202c";
+		g.fillRect(0,LOGICAL_H/2-58,LOGICAL_W,98);
+		g.globalAlpha=1;
+		g.font = "29px monospace";
+		g.fillStyle="#fff"; g.textAlign="center";
+		g.fillText("GAME OVER", LOGICAL_W/2, LOGICAL_H/2-2);
+		g.font = "16px monospace";
+		g.fillStyle="#93f2f9";
+		g.fillText("[Click or Space Bar - Again]", LOGICAL_W/2, LOGICAL_H/2+26);
+		// NEW RECORD BLINK
+		if(newRecord){
+			let blink = Math.floor((Date.now() - recordBlinkTime) / 300) % 2 === 0;
+			if(blink){
+				g.font = "bold 22px monospace";
+				g.fillStyle = "#ff8681";
+				g.fillText("NEW RECORD!", LOGICAL_W/2, LOGICAL_H/2+55);
+			}
+		}
+		g.textAlign="left";
+		g.restore();
+	}
+}
+
+// Only figures in field
+function drawPieceStrict(px,py,pr,typ,mode) {
+	const shape = SRS_SPAWNS[typ], col = tetroKeys.indexOf(typ);
+	for(let i=0;i<4;i++){
+		let [rx,ry]=srsBlockOffset(typ,shape[i][0],shape[i][1],pr);
+		let absx = px+rx-1, absy = py+ry;
+		if(absy < 0 || absy >= boardRows) continue;
+		g.save();
+		if(mode==="ghost") { g.globalAlpha=0.20; }
+		g.fillStyle=colors[col];
+		g.fillRect(absx*blockSize+1, absy*blockSize+1, blockSize-2, blockSize-2);
+		g.lineWidth=1.22;
+		g.strokeStyle='rgba(255,255,255,0.15)';
+		g.strokeRect(absx*blockSize+1.5, absy*blockSize+1.5, blockSize-3, blockSize-3);
+		g.restore();
+	}
+}
+function drawMiniPiece(mx,my,letter) {
+	const shape = SRS_SPAWNS[letter], col = tetroKeys.indexOf(letter);
+	let minX = Math.min(...shape.map(b=>b[0])), maxX = Math.max(...shape.map(b=>b[0]));
+	let minY = Math.min(...shape.map(b=>b[1])), maxY = Math.max(...shape.map(b=>b[1]));
+	let cx = (minX+maxX)/2, cy = (minY+maxY)/2;
+	for(let i=0;i<4;i++){
+		let xx=(shape[i][0]-cx)*blockSize/1.95,yy=(shape[i][1]-cy)*blockSize/1.95;
+		g.save();
+		g.fillStyle=colors[col];
+		g.fillRect(mx+8+xx,my+14+yy,blockSize/1.91,blockSize/1.91);
+		g.lineWidth=1;
+		g.strokeStyle="rgba(255,255,255,0.13)";
+		g.strokeRect(mx+8+xx+0.5,my+14+yy+0.5,blockSize/1.91-1,blockSize/1.91-1);
+		g.restore();
+	}
+}
+function drawLTRB(x,y,w,h,c,lw){ g.save(); g.strokeStyle = c; g.lineWidth=lw||1.4; g.strokeRect(x, y, w, h); g.restore(); }
+
+//-------- EVENT HANDLING ----------
+document.addEventListener('keydown',e=>{
+	if(!started){
+		started=true; draw(); return;
+	}
+	if(gameOver && (e.code==="Space"||e.code==="Enter")){
+		resetGame(); started=true; draw(); return;
+	}
+	if(gameOver) return;
+	if(e.code==="Escape"||e.key==="Esc"){
+		paused = !paused;
+		// Difficulty fix
+		if(!paused){
+			lastFallTime = Date.now();
+		}
+		draw();
+		return;
+	}
+	if(paused) return;
+
+	if(e.code==="ArrowLeft"||e.code==="KeyA"){
+		holdLeft = true;
+		holdRight = false;
+		move(-1,0);
+		moveDelay = Date.now() + DAS;
+	}
+	else if(e.code==="ArrowRight"||e.code==="KeyD"){
+		holdRight = true;
+		holdLeft = false;
+		move(1,0);
+		moveDelay = Date.now() + DAS;
+	}
+	else if(e.code==="ArrowDown"||e.code==="KeyS"){
+		holdDown = true;
+	}
+
+	else if(e.code==="Space"){ hardDrop(); }
+	else if(e.code==="ArrowUp"||e.code==="KeyW"||e.code==="KeyX"){tryRotate(1);}
+	else if(e.code==="KeyZ"){tryRotate(-1);}
+	else if(e.code==="ShiftLeft"||e.code==="KeyC"){ hold(); }
+	else if(e.code==="KeyR"){
+		hiscore = 0;
+		localStorage.removeItem('hiscore_tetris');
+		newRecord = false;
+	}
+	draw();
+	e.preventDefault();
+});
+
+document.addEventListener('keyup', e=>{
+	if(e.code==="ArrowLeft"||e.code==="KeyA") holdLeft = false;
+	if(e.code==="ArrowRight"||e.code==="KeyD") holdRight = false;
+	if(e.code==="ArrowDown"||e.code==="KeyS") holdDown = false;
+});
+
+canvas.addEventListener('click',function(){
+	if(!started){started=true;draw();return;}
+	if(gameOver){resetGame();started=true;draw();}
+});
+
+// Responsive scaling logic
+function fitCanvas() {
+
+  let ww = window.innerWidth;
+  let wh = window.innerHeight;
+
+  let scale = Math.min(
+    ww / LOGICAL_W,
+    wh / LOGICAL_H,
+    1.0
+  );
+
+  const dpr = window.devicePixelRatio || 1;
+
+  // CSS size
+  canvas.style.width  = (LOGICAL_W * scale) + 'px';
+  canvas.style.height = (LOGICAL_H * scale) + 'px';
+
+  // Real pixel size (DNR)
+  canvas.width  = Math.round(LOGICAL_W * scale * dpr);
+  canvas.height = Math.round(LOGICAL_H * scale * dpr);
+
+  // Reset transform
+  g.setTransform(1,0,0,1,0,0);
+
+  // Apply DPI scaling
+  g.scale(scale * dpr, scale * dpr);
+
+  draw();
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', fitCanvas);
+
+// START
+resetGame(); fitCanvas();
+
+// Animation/game timer (gravity)
+setInterval(()=>{
+	if(!started) return;
+
+	if(!gameOver && !paused){
+	// Difficulty fix
+		// Modern Tetris guideline gravity
+		let gravity = Math.pow(0.8 - ((level - 1) * 0.007), level - 1);
+		let spd = gravity * 1000;		// ms per cell
+		let now = Date.now();
+		if(now - lastFallTime > spd){
+			if(!move(0,1)) place();
+			lastFallTime = now;
+		}
+	}
+	let now = Date.now();
+
+	// Horizontal movement
+	if(!gameOver && !paused && started){
+		if(holdLeft || holdRight){
+			if(now >= moveDelay){
+				if(holdLeft) move(-1,0);
+				if(holdRight) move(1,0);
+				moveDelay = now + ARR;
+			}
+		}
+
+		// Soft drop 
+		if(holdDown){
+			if(now - lastSoftDropTime > SOFT_DROP_SPEED){
+				if(!move(0,1)) place();
+				lastSoftDropTime = now;
+			}
+		}
+	}
+
+
+	// Draw always (for blinking)
+	draw();
+}, 22);
+
+</script>
+</body>
+</html>
